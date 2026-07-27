@@ -1,11 +1,18 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-import plotly.express as px
 import hashlib
 import sqlite3
 import os
 from contextlib import contextmanager
+
+# Try to import plotly, but provide fallback if not available
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("Plotly is not installed. Charts will be disabled. Run: pip install plotly")
 
 # ==================== DATABASE MANAGER ====================
 
@@ -956,20 +963,23 @@ def admin_reports():
     st.subheader("📊 Station Summary")
     st.dataframe(station_summary, use_container_width=True)
     
-    # Visualization
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fig = px.bar(station_summary, x=station_summary.index, y='Total Fuel',
-                     title='Total Fuel by Station',
-                     color=station_summary.index)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        daily_trend = filtered_df.groupby('date')['total_fuel'].sum().reset_index()
-        fig = px.line(daily_trend, x='date', y='total_fuel',
-                      title='Daily Fuel Trend')
-        st.plotly_chart(fig, use_container_width=True)
+    # Visualization - only if plotly is available
+    if PLOTLY_AVAILABLE:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig = px.bar(station_summary, x=station_summary.index, y='Total Fuel',
+                         title='Total Fuel by Station',
+                         color=station_summary.index)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            daily_trend = filtered_df.groupby('date')['total_fuel'].sum().reset_index()
+            fig = px.line(daily_trend, x='date', y='total_fuel',
+                          title='Daily Fuel Trend')
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("📊 Charts are disabled. Install plotly to enable visualizations: pip install plotly")
 
 # ==================== SUPERVISOR DASHBOARD ====================
 
@@ -1135,8 +1145,8 @@ def station_overview(station):
     else:
         st.info(f"No history available for {station} station")
     
-    # Chart
-    if len(station_history) > 1:
+    # Chart - only if plotly is available
+    if PLOTLY_AVAILABLE and len(station_history) > 1:
         daily_fuel = station_history.groupby('date')['total_fuel'].sum().reset_index()
         fig = px.line(daily_fuel, x='date', y='total_fuel',
                       title=f'Daily Fuel Trend - {station} Station')
@@ -1173,17 +1183,22 @@ def supervisor_reports(station):
                 st.write("**Supervisors:** No data available")
         
         with col2:
-            # Fuel type breakdown
-            fuel_breakdown = pd.DataFrame({
-                'Type': ['Generator', 'Vehicle'],
-                'Total': [
-                    monthly_data['generator_fuel'].sum(),
-                    monthly_data['vehicle_fuel'].sum()
-                ]
-            })
-            fig = px.pie(fuel_breakdown, values='Total', names='Type',
-                         title='Fuel Type Distribution')
-            st.plotly_chart(fig, use_container_width=True)
+            # Fuel type breakdown - only if plotly is available
+            if PLOTLY_AVAILABLE:
+                fuel_breakdown = pd.DataFrame({
+                    'Type': ['Generator', 'Vehicle'],
+                    'Total': [
+                        monthly_data['generator_fuel'].sum(),
+                        monthly_data['vehicle_fuel'].sum()
+                    ]
+                })
+                fig = px.pie(fuel_breakdown, values='Total', names='Type',
+                             title='Fuel Type Distribution')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.write("**Fuel Type Breakdown:**")
+                st.write(f"Generator: {monthly_data['generator_fuel'].sum():.1f}L")
+                st.write(f"Vehicle: {monthly_data['vehicle_fuel'].sum():.1f}L")
 
 # ==================== MAIN APPLICATION ====================
 
