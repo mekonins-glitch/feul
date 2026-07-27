@@ -1,3 +1,8 @@
+"""
+Fuel Management System - Complete Application
+A Streamlit-based fuel management system for multiple stations with supervisor and admin roles.
+"""
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
@@ -12,7 +17,6 @@ try:
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
-    st.warning("Plotly is not installed. Charts will be disabled. Run: pip install plotly")
 
 # ==================== DATABASE MANAGER ====================
 
@@ -965,21 +969,24 @@ def admin_reports():
     
     # Visualization - only if plotly is available
     if PLOTLY_AVAILABLE:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig = px.bar(station_summary, x=station_summary.index, y='Total Fuel',
-                         title='Total Fuel by Station',
-                         color=station_summary.index)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            daily_trend = filtered_df.groupby('date')['total_fuel'].sum().reset_index()
-            fig = px.line(daily_trend, x='date', y='total_fuel',
-                          title='Daily Fuel Trend')
-            st.plotly_chart(fig, use_container_width=True)
+        try:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig = px.bar(station_summary, x=station_summary.index, y='Total Fuel',
+                             title='Total Fuel by Station',
+                             color=station_summary.index)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                daily_trend = filtered_df.groupby('date')['total_fuel'].sum().reset_index()
+                fig = px.line(daily_trend, x='date', y='total_fuel',
+                              title='Daily Fuel Trend')
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.info(f"📊 Chart error: {str(e)}")
     else:
-        st.info("📊 Charts are disabled. Install plotly to enable visualizations: pip install plotly")
+        st.info("📊 Charts are disabled. Install plotly to enable visualizations")
 
 # ==================== SUPERVISOR DASHBOARD ====================
 
@@ -1147,10 +1154,13 @@ def station_overview(station):
     
     # Chart - only if plotly is available
     if PLOTLY_AVAILABLE and len(station_history) > 1:
-        daily_fuel = station_history.groupby('date')['total_fuel'].sum().reset_index()
-        fig = px.line(daily_fuel, x='date', y='total_fuel',
-                      title=f'Daily Fuel Trend - {station} Station')
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            daily_fuel = station_history.groupby('date')['total_fuel'].sum().reset_index()
+            fig = px.line(daily_fuel, x='date', y='total_fuel',
+                          title=f'Daily Fuel Trend - {station} Station')
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            pass
 
 def supervisor_reports(station):
     """Reports for supervisor"""
@@ -1185,16 +1195,21 @@ def supervisor_reports(station):
         with col2:
             # Fuel type breakdown - only if plotly is available
             if PLOTLY_AVAILABLE:
-                fuel_breakdown = pd.DataFrame({
-                    'Type': ['Generator', 'Vehicle'],
-                    'Total': [
-                        monthly_data['generator_fuel'].sum(),
-                        monthly_data['vehicle_fuel'].sum()
-                    ]
-                })
-                fig = px.pie(fuel_breakdown, values='Total', names='Type',
-                             title='Fuel Type Distribution')
-                st.plotly_chart(fig, use_container_width=True)
+                try:
+                    fuel_breakdown = pd.DataFrame({
+                        'Type': ['Generator', 'Vehicle'],
+                        'Total': [
+                            monthly_data['generator_fuel'].sum(),
+                            monthly_data['vehicle_fuel'].sum()
+                        ]
+                    })
+                    fig = px.pie(fuel_breakdown, values='Total', names='Type',
+                                 title='Fuel Type Distribution')
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.write("**Fuel Type Breakdown:**")
+                    st.write(f"Generator: {monthly_data['generator_fuel'].sum():.1f}L")
+                    st.write(f"Vehicle: {monthly_data['vehicle_fuel'].sum():.1f}L")
             else:
                 st.write("**Fuel Type Breakdown:**")
                 st.write(f"Generator: {monthly_data['generator_fuel'].sum():.1f}L")
@@ -1203,11 +1218,13 @@ def supervisor_reports(station):
 # ==================== MAIN APPLICATION ====================
 
 def main():
+    """Main application entry point"""
     # Page config
     st.set_page_config(
         page_title="Fuel Management System",
         page_icon="⛽",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
     # Initialize database
@@ -1228,7 +1245,8 @@ def main():
         st.rerun()
         return
     
-    # Logout button in sidebar
+    # Sidebar
+    st.sidebar.markdown("### ⛽ Fuel Management System")
     st.sidebar.markdown("---")
     st.sidebar.write(f"**User:** {st.session_state.current_user}")
     st.sidebar.write(f"**Role:** {st.session_state.user_role}")
@@ -1239,11 +1257,15 @@ def main():
     else:
         st.sidebar.error("🔴 Inactive")
     
-    if st.sidebar.button("🚪 Logout"):
+    st.sidebar.markdown("---")
+    
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
         logout_user()
         st.rerun()
     
     st.sidebar.markdown("---")
+    st.sidebar.caption("© 2024 Fuel Management System")
+    st.sidebar.caption(f"Version: 1.0.0")
     
     # Route to appropriate dashboard
     if st.session_state.user_role == 'admin':
