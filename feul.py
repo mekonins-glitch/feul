@@ -1007,7 +1007,7 @@ def supervisor_dashboard():
     user_info = get_user_info(current_user)
     station = user_info['station']
     
-    st.header(f"📍 {station} Station - Supervisor Dashboard")
+    st.header(f" {station} Station - Supervisor Dashboard")
     st.info(f"Welcome, {user_info['name']}!")
     
     # Password change option for supervisor
