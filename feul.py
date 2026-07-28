@@ -1264,7 +1264,7 @@ def main():
         st.rerun()
     
     st.sidebar.markdown("---")
-    st.sidebar.caption("© 2024 Fuel Management System")
+    st.sidebar.caption("© 2018 E.C Modjo Hawasa Fuel Management System")
     st.sidebar.caption(f"Version: 1.0.0")
     
     # Route to appropriate dashboard
