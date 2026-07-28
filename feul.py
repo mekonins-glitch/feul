@@ -661,7 +661,7 @@ def admin_dashboard():
         st.rerun()
         return
     
-    st.header("👑 Administrator Dashboard")
+    st.header("Administrator Dashboard")
     
     # Password change option for admin
     change_password_ui()
