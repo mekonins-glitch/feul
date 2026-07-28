@@ -587,6 +587,10 @@ def get_dashboard_stats():
 def login_page():
     """Display login page"""
     st.title("⛽Modjo Hawasa Fuel Management System")
+    st.markdown(
+    "<h1 style='text-align: center;'>⛽ Modjo Hawasa Fuel Management System</h1>",
+    unsafe_allow_html=True
+)
     st.markdown("---")
     
     col1, col2, col3 = st.columns([1, 2, 1])
