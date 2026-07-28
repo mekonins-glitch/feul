@@ -1107,11 +1107,11 @@ def admin_reports():
             supervisor_list
         )
     
-    # Fuel type filter - Only All, Generator Only, Vehicle Only
+    # Fuel type filter - 5 options
     st.subheader("Fuel Type")
     fuel_type = st.radio(
         "Select Fuel Type",
-        ['All', 'Generator Only', 'Vehicle Only'],
+        ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None'],
         horizontal=True,
         index=0
     )
@@ -1133,13 +1133,19 @@ def admin_reports():
     if supervisor_filter != 'All':
         filtered_df = filtered_df[filtered_df['requested_by'] == supervisor_filter]
     
-    # Fuel type filter - fixed logic
+    # Fuel type filter - 5 options
     if fuel_type == 'Generator Only':
-        # Show records where generator fuel > 0 (vehicle can be anything)
+        # Only generator fuel (vehicle can be anything)
         filtered_df = filtered_df[filtered_df['generator_fuel'] > 0]
     elif fuel_type == 'Vehicle Only':
-        # Show records where vehicle fuel > 0 (generator can be anything)
+        # Only vehicle fuel (generator can be anything)
         filtered_df = filtered_df[filtered_df['vehicle_fuel'] > 0]
+    elif fuel_type == 'Both':
+        # Both generator AND vehicle fuel
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] > 0) & (filtered_df['vehicle_fuel'] > 0)]
+    elif fuel_type == 'None':
+        # No fuel (both are 0)
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] == 0) & (filtered_df['vehicle_fuel'] == 0)]
     # 'All' shows everything
     
     # Display results
@@ -1508,10 +1514,10 @@ def supervisor_reports(station, current_user):
         )
     
     with col3:
-        # Fuel type filter - Only All, Generator Only, Vehicle Only
+        # Fuel type filter - 5 options
         fuel_type = st.selectbox(
             "Fuel Type",
-            ['All', 'Generator Only', 'Vehicle Only']
+            ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None']
         )
     
     # Apply filters
@@ -1523,13 +1529,19 @@ def supervisor_reports(station, current_user):
         (filtered_df['date'] <= end_date)
     ]
     
-    # Fuel type filter - fixed logic
+    # Fuel type filter - 5 options
     if fuel_type == 'Generator Only':
-        # Show records where generator fuel > 0 (vehicle can be anything)
+        # Only generator fuel (vehicle can be anything)
         filtered_df = filtered_df[filtered_df['generator_fuel'] > 0]
     elif fuel_type == 'Vehicle Only':
-        # Show records where vehicle fuel > 0 (generator can be anything)
+        # Only vehicle fuel (generator can be anything)
         filtered_df = filtered_df[filtered_df['vehicle_fuel'] > 0]
+    elif fuel_type == 'Both':
+        # Both generator AND vehicle fuel
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] > 0) & (filtered_df['vehicle_fuel'] > 0)]
+    elif fuel_type == 'None':
+        # No fuel (both are 0)
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] == 0) & (filtered_df['vehicle_fuel'] == 0)]
     # 'All' shows everything
     
     # Display results
