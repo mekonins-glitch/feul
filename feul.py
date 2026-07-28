@@ -609,7 +609,7 @@ def login_page():
                     st.error(f"❌ {message}")
         
         st.markdown("---")
-        st.caption("Default Admin: admin / admin123")
+        st.caption("Prepared by: Sintayehu Mekonin")
 
 # ==================== PASSWORD CHANGE FUNCTION ====================
 
