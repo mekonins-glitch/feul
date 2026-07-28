@@ -1068,13 +1068,16 @@ def admin_reports():
     # Get available stations
     stations = ['All', 'Modjo', 'Koka', 'Bote', 'Meki', 'Batu']
     
-    # Filter section
+    # Fuel type options
+    fuel_types = ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None']
+    
+    # Filter section - 5 columns
     st.subheader("🔍 Filter Reports")
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        # Date range
+        # Date range - Start Date
         min_date = history_df['date'].min()
         max_date = history_df['date'].max()
         
@@ -1107,14 +1110,12 @@ def admin_reports():
             supervisor_list
         )
     
-    # Fuel type filter - 5 options
-    st.subheader("Fuel Type")
-    fuel_type = st.radio(
-        "Select Fuel Type",
-        ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None'],
-        horizontal=True,
-        index=0
-    )
+    with col5:
+        # Fuel type filter - 5th position
+        fuel_type = st.selectbox(
+            "Fuel Type",
+            fuel_types
+        )
     
     # Apply filters
     filtered_df = history_df.copy()
@@ -1486,7 +1487,10 @@ def supervisor_reports(station, current_user):
     # Convert date column
     station_history['date'] = pd.to_datetime(station_history['date']).dt.date
     
-    # Filter section
+    # Fuel type options
+    fuel_types = ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None']
+    
+    # Filter section - 3 columns
     st.subheader("🔍 Filter Reports")
     
     col1, col2, col3 = st.columns(3)
@@ -1514,10 +1518,11 @@ def supervisor_reports(station, current_user):
         )
     
     with col3:
-        # Fuel type filter - 5 options
+        # Fuel type filter - 5 options in 3rd column
         fuel_type = st.selectbox(
             "Fuel Type",
-            ['All', 'Generator Only', 'Vehicle Only', 'Both', 'None']
+            fuel_types,
+            key="supervisor_fuel_type"
         )
     
     # Apply filters
