@@ -5,7 +5,7 @@ A Streamlit-based fuel management system for multiple stations with supervisor a
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import hashlib
 import sqlite3
 import os
@@ -14,6 +14,7 @@ from contextlib import contextmanager
 # Try to import plotly, but provide fallback if not available
 try:
     import plotly.express as px
+    import plotly.graph_objects as go
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
@@ -513,6 +514,47 @@ def get_fuel_history(station=None, start_date=None, end_date=None):
     with get_db_connection() as conn:
         return pd.read_sql_query(query, conn, params=params)
 
+def get_filtered_history(station=None, supervisor=None, start_date=None, end_date=None):
+    """Get filtered fuel history with multiple filters"""
+    query = """
+        SELECT * FROM fuel_history 
+        WHERE 1=1
+    """
+    params = []
+    
+    if station:
+        query += " AND station = ?"
+        params.append(station)
+    
+    if supervisor:
+        query += " AND requested_by = ?"
+        params.append(supervisor)
+    
+    if start_date:
+        query += " AND date >= ?"
+        params.append(start_date.isoformat())
+    
+    if end_date:
+        query += " AND date <= ?"
+        params.append(end_date.isoformat())
+    
+    query += " ORDER BY date DESC, acceptance_time DESC"
+    
+    with get_db_connection() as conn:
+        return pd.read_sql_query(query, conn, params=params)
+
+def get_all_supervisors():
+    """Get all supervisors with their station assignments"""
+    query = """
+        SELECT DISTINCT u.username, u.name, u.station 
+        FROM users u
+        JOIN station_supervisors ss ON u.username = ss.username
+        WHERE u.role = 'supervisor' AND u.is_active = 1
+        ORDER BY u.name
+    """
+    with get_db_connection() as conn:
+        return pd.read_sql_query(query, conn)
+
 def get_station_supervisors(station=None):
     """Get supervisors for a station or all stations"""
     query = """
@@ -582,20 +624,87 @@ def get_dashboard_stats():
             'monthly_fuel': monthly_fuel
         }
 
+# ==================== REPORT FUNCTIONS ====================
+
+def create_summary_table(df, title="Summary"):
+    """Create a summary table from dataframe"""
+    if df.empty:
+        return None
+    
+    summary = {
+        'Metric': ['Total Records', 'Total Fuel (L)', 'Average Fuel (L)', 'Max Fuel (L)', 'Min Fuel (L)'],
+        'Value': [
+            len(df),
+            f"{df['total_fuel'].sum():.1f}",
+            f"{df['total_fuel'].mean():.1f}",
+            f"{df['total_fuel'].max():.1f}",
+            f"{df['total_fuel'].min():.1f}"
+        ]
+    }
+    return pd.DataFrame(summary)
+
+def create_station_summary(df):
+    """Create station-wise summary"""
+    if df.empty:
+        return None
+    
+    station_summary = df.groupby('station').agg({
+        'total_fuel': ['sum', 'mean', 'count'],
+        'generator_fuel': 'sum',
+        'vehicle_fuel': 'sum'
+    }).round(2)
+    
+    station_summary.columns = ['Total Fuel', 'Average Fuel', 'Number of Deliveries', 'Generator Total', 'Vehicle Total']
+    return station_summary
+
+def create_supervisor_summary(df):
+    """Create supervisor-wise summary"""
+    if df.empty:
+        return None
+    
+    supervisor_summary = df.groupby('requested_by').agg({
+        'total_fuel': ['sum', 'mean', 'count'],
+        'generator_fuel': 'sum',
+        'vehicle_fuel': 'sum'
+    }).round(2)
+    
+    supervisor_summary.columns = ['Total Fuel', 'Average Fuel', 'Number of Deliveries', 'Generator Total', 'Vehicle Total']
+    return supervisor_summary
+
+def create_daily_trend(df):
+    """Create daily trend data"""
+    if df.empty:
+        return None
+    
+    daily_trend = df.groupby('date').agg({
+        'total_fuel': 'sum',
+        'generator_fuel': 'sum',
+        'vehicle_fuel': 'sum'
+    }).reset_index()
+    
+    daily_trend.columns = ['Date', 'Total Fuel', 'Generator Fuel', 'Vehicle Fuel']
+    return daily_trend
+
+def export_to_csv(df, filename):
+    """Export dataframe to CSV"""
+    csv = df.to_csv(index=False)
+    return st.download_button(
+        label="📥 Download CSV",
+        data=csv,
+        file_name=filename,
+        mime="text/csv"
+    )
+
 # ==================== STREAMLIT UI FUNCTIONS ====================
 
 def login_page():
     """Display login page"""
-
-    st.markdown(
-    "<h1 style='text-align: center;'>⛽ Modjo Hawasa Fuel Management System</h1>",
-    unsafe_allow_html=True
-)
+    st.title("⛽ Fuel Management System")
     st.markdown("---")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # st.image("https://img.icons8.com/color/96/000000/gas-station.png", width=100)
+        st.image("https://img.icons8.com/color/96/000000/gas-station.png", width=100)
         st.subheader("Login to System")
         
         with st.form("login_form"):
@@ -613,7 +722,7 @@ def login_page():
                     st.error(f"❌ {message}")
         
         st.markdown("---")
-        st.caption("Prepared by: Sintayehu Mekonin")
+        st.caption("Default Admin: admin / admin123")
 
 # ==================== PASSWORD CHANGE FUNCTION ====================
 
@@ -661,7 +770,7 @@ def admin_dashboard():
         st.rerun()
         return
     
-    st.header("Administrator Dashboard")
+    st.header("👑 Administrator Dashboard")
     
     # Password change option for admin
     change_password_ui()
@@ -936,61 +1045,247 @@ def manage_fuel_requests():
             
             st.divider()
 
+# ==================== ADMIN REPORTS ====================
+
 def admin_reports():
-    """Admin reports"""
-    st.subheader("📈 Comprehensive Reports")
+    """Admin reports with advanced filtering"""
+    st.header("📈 Reports & Analytics")
     
+    # Get all history data
     history_df = get_fuel_history()
     
     if history_df.empty:
-        st.info("No historical data available")
+        st.info("No data available for reports. Please add fuel records first.")
         return
+    
+    # Convert date column
+    history_df['date'] = pd.to_datetime(history_df['date']).dt.date
+    
+    # Get available supervisors
+    supervisors_df = get_all_supervisors()
+    supervisor_list = ['All'] + supervisors_df['username'].tolist()
+    
+    # Get available stations
+    stations = ['All', 'Modjo', 'Koka', 'Bote', 'Meki', 'Batu']
+    
+    # Filter section
+    st.subheader("🔍 Filter Reports")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        # Date range
+        min_date = history_df['date'].min()
+        max_date = history_df['date'].max()
+        
+        start_date = st.date_input(
+            "Start Date",
+            value=min_date,
+            min_value=min_date,
+            max_value=max_date
+        )
+    
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            value=max_date,
+            min_value=min_date,
+            max_value=max_date
+        )
+    
+    with col3:
+        # Station filter
+        station_filter = st.selectbox(
+            "Station",
+            stations
+        )
+    
+    with col4:
+        # Supervisor filter
+        supervisor_filter = st.selectbox(
+            "Supervisor",
+            supervisor_list
+        )
+    
+    # Fuel type filter
+    fuel_type = st.radio(
+        "Fuel Type",
+        ['All', 'Generator Only', 'Vehicle Only', 'Both'],
+        horizontal=True
+    )
+    
+    # Apply filters
+    filtered_df = history_df.copy()
     
     # Date filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", pd.to_datetime(history_df['date']).min())
-    with col2:
-        end_date = st.date_input("End Date", pd.to_datetime(history_df['date']).max())
-    
-    filtered_df = history_df[
-        (pd.to_datetime(history_df['date']).dt.date >= start_date) & 
-        (pd.to_datetime(history_df['date']).dt.date <= end_date)
+    filtered_df = filtered_df[
+        (filtered_df['date'] >= start_date) & 
+        (filtered_df['date'] <= end_date)
     ]
     
-    if filtered_df.empty:
-        st.warning("No data for selected date range")
-        return
+    # Station filter
+    if station_filter != 'All':
+        filtered_df = filtered_df[filtered_df['station'] == station_filter]
     
-    # Station summary
-    station_summary = filtered_df.groupby('station').agg({
-        'total_fuel': ['sum', 'mean', 'count']
-    }).round(2)
-    station_summary.columns = ['Total Fuel', 'Average Fuel', 'Number of Requests']
+    # Supervisor filter
+    if supervisor_filter != 'All':
+        filtered_df = filtered_df[filtered_df['requested_by'] == supervisor_filter]
     
-    st.subheader("📊 Station Summary")
-    st.dataframe(station_summary, use_container_width=True)
+    # Fuel type filter
+    if fuel_type == 'Generator Only':
+        filtered_df = filtered_df[filtered_df['vehicle_fuel'] == 0]
+    elif fuel_type == 'Vehicle Only':
+        filtered_df = filtered_df[filtered_df['generator_fuel'] == 0]
+    elif fuel_type == 'Both':
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] > 0) & (filtered_df['vehicle_fuel'] > 0)]
     
-    # Visualization - only if plotly is available
-    if PLOTLY_AVAILABLE:
-        try:
+    # Display results
+    st.subheader(f"📊 Report Results ({len(filtered_df)} records)")
+    
+    # Summary metrics
+    if not filtered_df.empty:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("Total Fuel", f"{filtered_df['total_fuel'].sum():.1f} L")
+        with col2:
+            st.metric("Generator Fuel", f"{filtered_df['generator_fuel'].sum():.1f} L")
+        with col3:
+            st.metric("Vehicle Fuel", f"{filtered_df['vehicle_fuel'].sum():.1f} L")
+        with col4:
+            st.metric("Avg per Delivery", f"{filtered_df['total_fuel'].mean():.1f} L")
+        with col5:
+            st.metric("Total Deliveries", len(filtered_df))
+    
+    # Create tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Detailed Data", "📊 Station Summary", "👤 Supervisor Summary", "📈 Charts"])
+    
+    with tab1:
+        # Detailed data table
+        if not filtered_df.empty:
+            display_df = filtered_df[['date', 'station', 'generator_fuel', 'vehicle_fuel', 
+                                     'total_fuel', 'provider_name', 'requested_by', 'accepted_by']]
+            display_df.columns = ['Date', 'Station', 'Generator (L)', 'Vehicle (L)', 
+                                 'Total (L)', 'Provider', 'Supervisor', 'Approved By']
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Export option
+            col1, col2 = st.columns(2)
+            with col1:
+                export_to_csv(filtered_df, f"fuel_report_{datetime.now().strftime('%Y%m%d')}.csv")
+            with col2:
+                # Summary statistics
+                summary_df = create_summary_table(filtered_df)
+                if summary_df is not None:
+                    st.dataframe(summary_df, use_container_width=True)
+        else:
+            st.info("No data matches the selected filters")
+    
+    with tab2:
+        # Station summary
+        station_summary = create_station_summary(filtered_df)
+        if station_summary is not None and not station_summary.empty:
+            st.dataframe(station_summary, use_container_width=True)
+            
+            # Chart - only if plotly is available
+            if PLOTLY_AVAILABLE:
+                try:
+                    fig = px.bar(
+                        station_summary, 
+                        x=station_summary.index, 
+                        y='Total Fuel',
+                        title='Fuel Distribution by Station',
+                        color=station_summary.index,
+                        text=station_summary['Total Fuel']
+                    )
+                    fig.update_traces(texttemplate='%{text:.1f}L', textposition='outside')
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.info("Chart rendering error")
+        else:
+            st.info("No data available for station summary")
+    
+    with tab3:
+        # Supervisor summary
+        supervisor_summary = create_supervisor_summary(filtered_df)
+        if supervisor_summary is not None and not supervisor_summary.empty:
+            st.dataframe(supervisor_summary, use_container_width=True)
+            
+            # Chart - only if plotly is available
+            if PLOTLY_AVAILABLE:
+                try:
+                    fig = px.bar(
+                        supervisor_summary, 
+                        x=supervisor_summary.index, 
+                        y='Total Fuel',
+                        title='Fuel Distribution by Supervisor',
+                        color=supervisor_summary.index,
+                        text=supervisor_summary['Total Fuel']
+                    )
+                    fig.update_traces(texttemplate='%{text:.1f}L', textposition='outside')
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.info("Chart rendering error")
+        else:
+            st.info("No data available for supervisor summary")
+    
+    with tab4:
+        # Charts section
+        if PLOTLY_AVAILABLE and not filtered_df.empty:
             col1, col2 = st.columns(2)
             
             with col1:
-                fig = px.bar(station_summary, x=station_summary.index, y='Total Fuel',
-                             title='Total Fuel by Station',
-                             color=station_summary.index)
-                st.plotly_chart(fig, use_container_width=True)
+                # Daily trend
+                daily_trend = create_daily_trend(filtered_df)
+                if daily_trend is not None:
+                    fig = px.line(
+                        daily_trend, 
+                        x='Date', 
+                        y=['Generator Fuel', 'Vehicle Fuel', 'Total Fuel'],
+                        title='Daily Fuel Trend',
+                        markers=True
+                    )
+                    fig.update_layout(legend_title_text='Fuel Type')
+                    st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                daily_trend = filtered_df.groupby('date')['total_fuel'].sum().reset_index()
-                fig = px.line(daily_trend, x='date', y='total_fuel',
-                              title='Daily Fuel Trend')
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.info(f"📊 Chart error: {str(e)}")
-    else:
-        st.info("📊 Charts are disabled. Install plotly to enable visualizations")
+                # Fuel type breakdown
+                if not filtered_df.empty:
+                    fuel_breakdown = pd.DataFrame({
+                        'Type': ['Generator', 'Vehicle'],
+                        'Total': [
+                            filtered_df['generator_fuel'].sum(),
+                            filtered_df['vehicle_fuel'].sum()
+                        ]
+                    })
+                    fig = px.pie(
+                        fuel_breakdown, 
+                        values='Total', 
+                        names='Type',
+                        title='Fuel Type Distribution',
+                        hole=0.3
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            # Provider analysis
+            if not filtered_df.empty and filtered_df['provider_name'].notna().any():
+                st.subheader("Top Fuel Providers")
+                provider_summary = filtered_df.groupby('provider_name')['total_fuel'].sum().sort_values(ascending=False).head(10)
+                if not provider_summary.empty:
+                    fig = px.bar(
+                        x=provider_summary.values,
+                        y=provider_summary.index,
+                        orientation='h',
+                        title='Top 10 Fuel Providers',
+                        text=provider_summary.values
+                    )
+                    fig.update_traces(texttemplate='%{text:.1f}L', textposition='outside')
+                    fig.update_layout(xaxis_title='Total Fuel (L)')
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("📊 Charts require plotly library. Install with: pip install plotly")
 
 # ==================== SUPERVISOR DASHBOARD ====================
 
@@ -1007,7 +1302,7 @@ def supervisor_dashboard():
     user_info = get_user_info(current_user)
     station = user_info['station']
     
-    st.header(f" {station} Station - Supervisor Dashboard")
+    st.header(f"📍 {station} Station - Supervisor Dashboard")
     st.info(f"Welcome, {user_info['name']}!")
     
     # Password change option for supervisor
@@ -1023,7 +1318,7 @@ def supervisor_dashboard():
         station_overview(station)
     
     with tab3:
-        supervisor_reports(station)
+        supervisor_reports(station, current_user)
 
 def accept_fuel_ui(station):
     """Supervisor accepts fuel - UI function"""
@@ -1166,58 +1461,190 @@ def station_overview(station):
         except Exception as e:
             pass
 
-def supervisor_reports(station):
-    """Reports for supervisor"""
+# ==================== SUPERVISOR REPORTS ====================
+
+def supervisor_reports(station, current_user):
+    """Supervisor reports with filtering"""
     st.subheader(f"📈 {station} Station Reports")
     
+    # Get history for this station
     station_history = get_fuel_history(station=station)
     
     if station_history.empty:
         st.info(f"No data available for {station} station")
         return
     
-    # Monthly summary
-    current_month = date.today().replace(day=1).isoformat()
-    monthly_data = station_history[station_history['date'] >= current_month]
+    # Convert date column
+    station_history['date'] = pd.to_datetime(station_history['date']).dt.date
     
-    if not monthly_data.empty:
-        col1, col2 = st.columns(2)
+    # Filter section
+    st.subheader("🔍 Filter Reports")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Date range
+        min_date = station_history['date'].min()
+        max_date = station_history['date'].max()
+        
+        start_date = st.date_input(
+            "Start Date",
+            value=min_date,
+            min_value=min_date,
+            max_value=max_date,
+            key="supervisor_start_date"
+        )
+    
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            value=max_date,
+            min_value=min_date,
+            max_value=max_date,
+            key="supervisor_end_date"
+        )
+    
+    with col3:
+        # Fuel type filter
+        fuel_type = st.selectbox(
+            "Fuel Type",
+            ['All', 'Generator Only', 'Vehicle Only', 'Both']
+        )
+    
+    # Apply filters
+    filtered_df = station_history.copy()
+    
+    # Date filter
+    filtered_df = filtered_df[
+        (filtered_df['date'] >= start_date) & 
+        (filtered_df['date'] <= end_date)
+    ]
+    
+    # Fuel type filter
+    if fuel_type == 'Generator Only':
+        filtered_df = filtered_df[filtered_df['vehicle_fuel'] == 0]
+    elif fuel_type == 'Vehicle Only':
+        filtered_df = filtered_df[filtered_df['generator_fuel'] == 0]
+    elif fuel_type == 'Both':
+        filtered_df = filtered_df[(filtered_df['generator_fuel'] > 0) & (filtered_df['vehicle_fuel'] > 0)]
+    
+    # Display results
+    st.subheader(f"📊 Report Results ({len(filtered_df)} records)")
+    
+    # Summary metrics
+    if not filtered_df.empty:
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.write("**Monthly Summary**")
-            st.write(f"Total Fuel: {monthly_data['total_fuel'].sum():.1f}L")
-            st.write(f"Average: {monthly_data['total_fuel'].mean():.1f}L")
-            st.write(f"Deliveries: {len(monthly_data)}")
-            
-            # Show supervisor info - handle None values
-            supervisors = monthly_data['requested_by'].dropna().unique()
-            if len(supervisors) > 0:
-                st.write(f"**Supervisors:** {', '.join([str(s) for s in supervisors if s])}")
-            else:
-                st.write("**Supervisors:** No data available")
-        
+            st.metric("Total Fuel", f"{filtered_df['total_fuel'].sum():.1f} L")
         with col2:
-            # Fuel type breakdown - only if plotly is available
-            if PLOTLY_AVAILABLE:
-                try:
-                    fuel_breakdown = pd.DataFrame({
-                        'Type': ['Generator', 'Vehicle'],
-                        'Total': [
-                            monthly_data['generator_fuel'].sum(),
-                            monthly_data['vehicle_fuel'].sum()
-                        ]
-                    })
-                    fig = px.pie(fuel_breakdown, values='Total', names='Type',
-                                 title='Fuel Type Distribution')
+            st.metric("Generator Fuel", f"{filtered_df['generator_fuel'].sum():.1f} L")
+        with col3:
+            st.metric("Vehicle Fuel", f"{filtered_df['vehicle_fuel'].sum():.1f} L")
+        with col4:
+            st.metric("Total Deliveries", len(filtered_df))
+    
+    # Create tabs for different views
+    tab1, tab2, tab3 = st.tabs(["📋 Detailed Data", "📊 Summary", "📈 Charts"])
+    
+    with tab1:
+        if not filtered_df.empty:
+            display_df = filtered_df[['date', 'generator_fuel', 'vehicle_fuel', 
+                                     'total_fuel', 'provider_name', 'accepted_by']]
+            display_df.columns = ['Date', 'Generator (L)', 'Vehicle (L)', 
+                                 'Total (L)', 'Provider', 'Approved By']
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Export option
+            export_to_csv(filtered_df, f"station_report_{station}_{datetime.now().strftime('%Y%m%d')}.csv")
+        else:
+            st.info("No data matches the selected filters")
+    
+    with tab2:
+        if not filtered_df.empty:
+            # Summary table
+            summary_df = create_summary_table(filtered_df)
+            if summary_df is not None:
+                st.dataframe(summary_df, use_container_width=True)
+            
+            # Daily summary
+            st.subheader("Daily Summary")
+            daily_summary = filtered_df.groupby('date').agg({
+                'total_fuel': 'sum',
+                'generator_fuel': 'sum',
+                'vehicle_fuel': 'sum',
+                'request_id': 'count'
+            }).reset_index()
+            daily_summary.columns = ['Date', 'Total Fuel', 'Generator Fuel', 'Vehicle Fuel', 'Deliveries']
+            st.dataframe(daily_summary, use_container_width=True)
+            
+            # Provider summary
+            if filtered_df['provider_name'].notna().any():
+                st.subheader("Provider Summary")
+                provider_summary = filtered_df.groupby('provider_name').agg({
+                    'total_fuel': 'sum',
+                    'request_id': 'count'
+                }).reset_index()
+                provider_summary.columns = ['Provider', 'Total Fuel', 'Deliveries']
+                provider_summary = provider_summary.sort_values('Total Fuel', ascending=False)
+                st.dataframe(provider_summary, use_container_width=True)
+        else:
+            st.info("No data available for summary")
+    
+    with tab3:
+        # Charts - only if plotly is available
+        if PLOTLY_AVAILABLE and not filtered_df.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Daily trend
+                daily_trend = create_daily_trend(filtered_df)
+                if daily_trend is not None:
+                    fig = px.line(
+                        daily_trend, 
+                        x='Date', 
+                        y=['Generator Fuel', 'Vehicle Fuel', 'Total Fuel'],
+                        title=f'Daily Fuel Trend - {station} Station',
+                        markers=True
+                    )
+                    fig.update_layout(legend_title_text='Fuel Type')
                     st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.write("**Fuel Type Breakdown:**")
-                    st.write(f"Generator: {monthly_data['generator_fuel'].sum():.1f}L")
-                    st.write(f"Vehicle: {monthly_data['vehicle_fuel'].sum():.1f}L")
-            else:
-                st.write("**Fuel Type Breakdown:**")
-                st.write(f"Generator: {monthly_data['generator_fuel'].sum():.1f}L")
-                st.write(f"Vehicle: {monthly_data['vehicle_fuel'].sum():.1f}L")
+            
+            with col2:
+                # Fuel type breakdown
+                fuel_breakdown = pd.DataFrame({
+                    'Type': ['Generator', 'Vehicle'],
+                    'Total': [
+                        filtered_df['generator_fuel'].sum(),
+                        filtered_df['vehicle_fuel'].sum()
+                    ]
+                })
+                fig = px.pie(
+                    fuel_breakdown, 
+                    values='Total', 
+                    names='Type',
+                    title='Fuel Type Distribution',
+                    hole=0.3
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Provider analysis
+            if not filtered_df.empty and filtered_df['provider_name'].notna().any():
+                st.subheader("Fuel Providers")
+                provider_summary = filtered_df.groupby('provider_name')['total_fuel'].sum().sort_values(ascending=False)
+                if not provider_summary.empty:
+                    fig = px.bar(
+                        x=provider_summary.values,
+                        y=provider_summary.index,
+                        orientation='h',
+                        title='Fuel Distribution by Provider',
+                        text=provider_summary.values
+                    )
+                    fig.update_traces(texttemplate='%{text:.1f}L', textposition='outside')
+                    fig.update_layout(xaxis_title='Total Fuel (L)')
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("📊 Charts require plotly library. Install with: pip install plotly")
 
 # ==================== MAIN APPLICATION ====================
 
@@ -1250,7 +1677,7 @@ def main():
         return
     
     # Sidebar
-    st.sidebar.markdown("### ⛽ MH Fuel Management System")
+    st.sidebar.markdown("### ⛽ Fuel Management System")
     st.sidebar.markdown("---")
     st.sidebar.write(f"**User:** {st.session_state.current_user}")
     st.sidebar.write(f"**Role:** {st.session_state.user_role}")
@@ -1268,7 +1695,7 @@ def main():
         st.rerun()
     
     st.sidebar.markdown("---")
-    st.sidebar.caption("© 2018 E.C Modjo Hawasa Fuel Management System")
+    st.sidebar.caption("© 2024 Fuel Management System")
     st.sidebar.caption(f"Version: 1.0.0")
     
     # Route to appropriate dashboard
