@@ -1250,7 +1250,7 @@ def main():
         return
     
     # Sidebar
-    st.sidebar.markdown("### ⛽ Fuel Management System")
+    st.sidebar.markdown("### ⛽ MH Fuel Management System")
     st.sidebar.markdown("---")
     st.sidebar.write(f"**User:** {st.session_state.current_user}")
     st.sidebar.write(f"**Role:** {st.session_state.user_role}")
