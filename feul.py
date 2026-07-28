@@ -595,7 +595,7 @@ def login_page():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("https://img.icons8.com/color/96/000000/gas-station.png", width=100)
+        # st.image("https://img.icons8.com/color/96/000000/gas-station.png", width=100)
         st.subheader("Login to System")
         
         with st.form("login_form"):
